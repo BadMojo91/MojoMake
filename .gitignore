@@ -67,3 +67,7 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+/.vs
+/MojoMake/x64
+/x64
+*.aps
