@@ -1,5 +1,7 @@
 # MojoMake
 
+![Preview](Preview.png)
+
 MojoMake is a small command-line helper for compiling UnrealScript packages for Deus Ex projects. It automates preparing .ini entries, backing up and removing .u files, scanning .uc files for UE2 compatibility, and invoking the Unreal `UCC`/`UED22` compilers.
 
 Features
