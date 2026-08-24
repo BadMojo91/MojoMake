@@ -23,6 +23,36 @@ static void resetColor() {
 
 DeusExBuilder::DeusExBuilder() : ue2_support(false) {}
 
+std::vector<std::string> DeusExBuilder::findGameRootsFromCwd() {
+    std::vector<std::string> results;
+    try {
+        fs::path cur = fs::current_path();
+        std::set<std::string> seen;
+        const std::vector<std::string> executables = {"deusex.exe", "unreal.exe", "unrealtournament.exe", "UCC.exe"};
+
+        while (true) {
+            fs::path system_dir = cur / "System";
+            if (fs::exists(system_dir) && fs::is_directory(system_dir)) {
+                for (const auto &exe : executables) {
+                    if (fs::exists(system_dir / exe)) {
+                        std::string root = cur.string();
+                        if (seen.insert(root).second) {
+                            results.push_back(root);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if (cur == cur.root_path()) break;
+            cur = cur.parent_path();
+        }
+    } catch (const std::exception&) {
+        // ignore errors and return whatever found
+    }
+    return results;
+}
+
 bool DeusExBuilder::initialize() {
     if (!loadOrCreateConfig()) return false;
     if (!validateGamePath()) return false;
@@ -34,20 +64,61 @@ bool DeusExBuilder::initialize() {
 
 bool DeusExBuilder::loadOrCreateConfig() {
     IniFile config;
-    
-    if (!fs::exists("MojoMake.ini")) {
+    // Store absolute path to MojoMake.ini from the initial working directory
+    config_path = fs::current_path().string() + "/MojoMake.ini";
+
+    if (!fs::exists(config_path)) {
         std::cout << "MojoMake.ini not found. Creating MojoMake.ini..." << std::endl;
-        
+
+        // Offer candidate game paths found by scanning current and parent directories
+        auto candidates = findGameRootsFromCwd();
+        if (!candidates.empty()) {
+            std::cout << "Found potential game directories:" << std::endl;
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                std::cout << "  " << (i + 1) << ": " << candidates[i] << std::endl;
+            }
+            std::cout << "Enter a number to select a candidate, or type an absolute path: ";
+            std::string choice;
+            std::getline(std::cin, choice);
+            if (!choice.empty()) {
+                try {
+                    int idx = std::stoi(choice) - 1;
+                    if (idx >= 0 && idx < (int)candidates.size()) {
+                        game_path = candidates[idx];
+                    } else {
+                        game_path = choice; // treat as path
+                    }
+                } catch (const std::exception&) {
+                    game_path = choice; // treat non-numeric as path
+                }
+            }
+        } else {
+            std::cout << "Please enter the game path: ";
+            std::getline(std::cin, game_path);
+        }
+
+        // Validate provided game path
+        if (game_path.empty()) {
+            std::cout << "Game path cannot be empty. Cancelled." << std::endl;
+            return false;
+        }
+        std::string test_system = game_path + "/System";
+        if (!fs::exists(game_path) || !fs::exists(test_system) || !fs::exists(test_system + "/UCC.exe")) {
+            std::cout << "Specified game path is invalid or missing System/UCC.exe." << std::endl;
+            return false;
+        }
+
         std::cout << "Please enter the project name: ";
         std::getline(std::cin, project_name);
-        
-        std::cout << "Please enter the game path: ";
-        std::getline(std::cin, game_path);
-        
+        if (project_name.empty()) {
+            std::cout << "Project name cannot be empty. Cancelled." << std::endl;
+            return false;
+        }
+
         config.setValue("Game.Info", "ProjectName", project_name);
         config.setValue("Game.Info", "GamePath", game_path);
-        
-        if (!config.save("MojoMake.ini")) {
+
+        if (!config.save(config_path)) {
             std::cerr << "Failed to create MojoMake.ini" << std::endl;
             return false;
         }
@@ -67,12 +138,34 @@ bool DeusExBuilder::loadOrCreateConfig() {
         performInitialPackageScan();
         
         // Reload config to get the packages that were just added
-        if (!config.load("MojoMake.ini")) {
+        if (!config.load(config_path)) {
             std::cerr << "Failed to reload MojoMake.ini after scan" << std::endl;
             return false;
         }
+        // Automatically add [Build] blacklist containing Default.ini EditPackages
+        try {
+            IniFile default_ini;
+            if (fs::exists(system_dir + "/Default.ini") && default_ini.load(system_dir + "/Default.ini")) {
+                auto default_edit_packages = default_ini.getValues("Editor.EditorEngine", "EditPackages");
+                // Avoid duplicates in the config
+                auto existing_black = config.getValues("Build", "Blacklist");
+                std::set<std::string> existing_set(existing_black.begin(), existing_black.end());
+                bool added = false;
+                for (const auto& pkg : default_edit_packages) {
+                    if (existing_set.find(pkg) == existing_set.end()) {
+                        config.addValue("Build", "Blacklist", pkg);
+                        added = true;
+                    }
+                }
+                if (added) {
+                    config.save(config_path);
+                }
+            }
+        } catch (const std::exception&) {
+            // Non-fatal; continue
+        }
     } else {
-        if (!config.load("MojoMake.ini")) {
+        if (!config.load(config_path)) {
             std::cerr << "Failed to load MojoMake.ini" << std::endl;
             return false;
         }
@@ -192,7 +285,7 @@ bool DeusExBuilder::syncEditPackages() {
         return false;
     }
 
-    if (!config.load("MojoMake.ini")) {
+    if (!config.load(config_path)) {
         std::cerr << "Failed to load MojoMake.ini" << std::endl;
         return false;
     }
@@ -230,6 +323,8 @@ bool DeusExBuilder::syncEditPackages() {
     // Store project packages for menu
     project_edit_packages = config.getValues("Editor.EditorEngine", "EditPackages");
     ue2_edit_packages = config.getValues("UE2.Editor", "EditPackages");
+    // Load optional blacklist for builds
+    blacklist_packages = config.getValues("Build", "Blacklist");
 
     return true;
 }
@@ -240,7 +335,7 @@ void DeusExBuilder::showMenu() {
         setColor(11); // Cyan
         std::cout << "===============================================" << std::endl;
         std::cout << "UnrealScript Compiler Menu" << std::endl;
-		std::cout << "Version 1.0" << std::endl;
+		std::cout << "Version " << MOJO_MAKE_VERSION << std::endl;
         resetColor();
         setColor(14); // Yellow
         std::cout << "Project: ";
@@ -253,38 +348,67 @@ void DeusExBuilder::showMenu() {
         setColor(11); // Cyan
         std::cout << "===============================================" << std::endl;
         resetColor();
+
+        // Show blacklisted packages (in grey) under the title
+        if (!blacklist_packages.empty()) {
+            setColor(8); // Grey
+            std::cout << "\n=== Blacklisted EditPackages ===" << std::endl;
+            for (const auto& bp : blacklist_packages) {
+                std::cout << "  - " << bp << std::endl;
+            }
+            resetColor();
+            std::cout << std::endl;
+        }
+
         setColor(10); // Green
+        std::cout << "\n===============  UE1 Packages  ================" << std::endl;
         std::cout << "1: All UE1 packages" << std::endl;
         resetColor();
         
         int choice_index = 2;
         for (size_t i = 0; i < project_edit_packages.size(); ++i) {
-            setColor(10); // Green
-            std::cout << choice_index << ": " << project_edit_packages[i] << " (UE1)" << std::endl;
+            const auto& pkg = project_edit_packages[i];
+            bool is_black = std::find(blacklist_packages.begin(), blacklist_packages.end(), pkg) != blacklist_packages.end();
+            if (is_black) {
+                setColor(6); // Orange/Brown
+                std::cout << choice_index << ": " << pkg << " [blacklisted]" << std::endl;
+            } else {
+                setColor(10); // Green
+                std::cout << choice_index << ": " << pkg << std::endl;
+            }
             resetColor();
             choice_index++;
         }
         
         if (ue2_support && !ue2_edit_packages.empty()) {
             setColor(13); // Magenta
+            std::cout << "\n===============  UE2 Packages  ================" << std::endl;
             std::cout << choice_index << ": All UE2 packages" << std::endl;
             resetColor();
             choice_index++;
             
             for (size_t i = 0; i < ue2_edit_packages.size(); ++i) {
                 setColor(13); // Magenta
-                std::cout << choice_index << ": " << ue2_edit_packages[i] << " (UE2)" << std::endl;
+                std::cout << choice_index << ": " << ue2_edit_packages[i] << std::endl;
                 resetColor();
                 choice_index++;
             }
         }
         
         setColor(14); // Yellow
+        std::cout << "\n=================  Options  ===================" << std::endl;
         std::cout << "s: Scan packages for UE2 compatibility" << std::endl;
+        setColor(14); // Yellow
+        std::cout << "b: Toggle blacklist for project packages" << std::endl;
         if (ue2_support) {
             std::cout << "u: Update UnrealTournament.ini with UE2 packages" << std::endl;
             std::cout << "c: Clean UE2 packages from UnrealTournament.ini" << std::endl;
         }
+        std::cout << std::endl;
+		std::cout << "r: Reset Config (MojoMake.ini)" << std::endl;
+		std::cout << "g: Set Game Directory" << std::endl;
+        std::cout << "j: Set Project Name" << std::endl;
+		std::cout << "p: Rescan packages" << std::endl;
         std::cout << "q: Quit" << std::endl;
         resetColor();
         std::cout << std::endl << "Please select a package to compile: ";
@@ -306,6 +430,29 @@ void DeusExBuilder::showMenu() {
             scanForUE2Compatibility();
             continue;
         }
+
+        if (input == "r" || input == "R") {
+            std::cout << std::endl << "This will remove and recreate MojoMake.ini. Continue? (y/n): ";
+            std::string resp;
+            std::getline(std::cin, resp);
+            if (resp != "y" && resp != "Y") {
+                std::cout << "Cancelled." << std::endl;
+                continue;
+            }
+
+            try {
+                if (fs::exists(config_path)) {
+                    fs::remove(config_path);
+                    std::cout << "Removed existing MojoMake.ini" << std::endl;
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "Failed to remove existing MojoMake.ini: " << e.what() << std::endl;
+                continue;
+            }
+
+            initialize();
+            continue;
+        }
         
         if ((input == "u" || input == "U") && ue2_support) {
             updateUnrealTournamentIniManual();
@@ -314,6 +461,64 @@ void DeusExBuilder::showMenu() {
         
         if ((input == "c" || input == "C") && ue2_support) {
             cleanUnrealTournamentIni();
+            continue;
+        }
+
+        if (input == "b" || input == "B") {
+            // Toggle blacklist for project packages
+            IniFile config;
+            if (!config.load(config_path)) {
+                std::cerr << "Failed to load MojoMake.ini" << std::endl;
+            } else {
+                std::cout << std::endl << "Project packages:" << std::endl;
+                for (size_t i = 0; i < project_edit_packages.size(); ++i) {
+                    const auto& pkg = project_edit_packages[i];
+                    bool is_black = std::find(blacklist_packages.begin(), blacklist_packages.end(), pkg) != blacklist_packages.end();
+                    std::cout << (i + 1) << ": " << pkg;
+                    if (is_black) {
+                        setColor(8); // Grey
+                        std::cout << " (blacklisted)";
+                        resetColor();
+                    }
+                    std::cout << std::endl;
+                }
+
+                std::cout << std::endl << "Enter package number to toggle blacklist (or q to cancel): ";
+                std::string sel;
+                std::getline(std::cin, sel);
+                if (sel.empty() || sel == "q" || sel == "Q") {
+                    continue;
+                }
+
+                try {
+                    int idx = std::stoi(sel) - 1;
+                    if (idx < 0 || idx >= (int)project_edit_packages.size()) {
+                        std::cout << "Invalid selection" << std::endl;
+                        continue;
+                    }
+
+                    std::string target = project_edit_packages[idx];
+                    // Toggle in config Build:Blacklist
+                    bool currently_black = std::find(blacklist_packages.begin(), blacklist_packages.end(), target) != blacklist_packages.end();
+                    if (currently_black) {
+                        config.removeValue("Build", "Blacklist", target);
+                        std::cout << "Removed " << target << " from blacklist" << std::endl;
+                    } else {
+                        config.addValue("Build", "Blacklist", target);
+                        std::cout << "Added " << target << " to blacklist" << std::endl;
+                    }
+
+                    if (!config.save(config_path)) {
+                        std::cerr << "Failed to save MojoMake.ini" << std::endl;
+                    } else {
+                        // Reload blacklist in memory
+                        blacklist_packages = config.getValues("Build", "Blacklist");
+                    }
+                } catch (const std::exception&) {
+                    std::cout << "Invalid input" << std::endl;
+                }
+            }
+
             continue;
         }
         
@@ -360,7 +565,7 @@ void DeusExBuilder::performInitialPackageScan() {
     
     if (!default_ini.load(system_dir + "/Default.ini") || 
         !project_ini.load(project_system_dir + "/" + project_name + ".ini") ||
-        !config.load("MojoMake.ini")) {
+        !config.load(config_path)) {
         std::cout << "Failed to load ini files for initial scan" << std::endl;
         return;
     }
@@ -445,7 +650,7 @@ void DeusExBuilder::scanForUE2Compatibility() {
     std::cout << std::endl << "Scanning packages for UE2 compatibility..." << std::endl;
     
     IniFile config;
-    if (!config.load("MojoMake.ini")) {
+    if (!config.load(config_path)) {
         std::cerr << "Failed to load MojoMake.ini" << std::endl;
         return;
     }
@@ -637,15 +842,24 @@ void DeusExBuilder::process_exclusive_code(int version, bool is_enabled, const s
     }
 }
 
-bool DeusExBuilder::updateDeusExIni(bool add_packages, bool ue2) {
+bool DeusExBuilder::updateDeusExIni(bool add_packages, bool ue2, const std::vector<std::string>* packages_override) {
     IniFile deusex_ini;
     if (!deusex_ini.load(system_dir + "/DeusEx.ini")) {
         std::cerr << "Failed to load DeusEx.ini" << std::endl;
         return false;
     }
 
-    const auto& packages = ue2 ? ue2_edit_packages : project_edit_packages;
-    
+    const std::vector<std::string>* packages_ptr = nullptr;
+    std::vector<std::string> temp_packages;
+
+    if (packages_override) {
+        packages_ptr = packages_override;
+    } else {
+        packages_ptr = &((ue2) ? ue2_edit_packages : project_edit_packages);
+    }
+
+    const auto& packages = *packages_ptr;
+
     if (add_packages) {
         for (const auto& pkg : packages) {
             deusex_ini.addValue("Editor.EditorEngine", "EditPackages", pkg);
@@ -659,41 +873,43 @@ bool DeusExBuilder::updateDeusExIni(bool add_packages, bool ue2) {
     return deusex_ini.save(system_dir + "/DeusEx.ini");
 }
 
-bool DeusExBuilder::updateUnrealTournamentIni(bool add_packages) {
+bool DeusExBuilder::updateUnrealTournamentIni(bool add_packages, const std::vector<std::string>* packages_override) {
     std::string ut_ini_path = ued22_dir + "/UnrealTournament.ini";
-    
+
     if (!fs::exists(ut_ini_path)) {
         std::cerr << "UnrealTournament.ini not found" << std::endl;
         return false;
     }
-    
+
     IniFile ut_ini;
     if (!ut_ini.load(ut_ini_path)) {
         std::cerr << "Failed to load UnrealTournament.ini" << std::endl;
         return false;
     }
-    
+
+    const std::vector<std::string>* packages_ptr = packages_override ? packages_override : &ue2_edit_packages;
+
     if (add_packages) {
         // Add packages that aren't already present
         auto existing_packages = ut_ini.getValues("Editor.EditorEngine", "EditPackages");
         std::set<std::string> existing_set(existing_packages.begin(), existing_packages.end());
-        
+
         bool added_any = false;
-        for (const auto& pkg : ue2_edit_packages) {
+        for (const auto& pkg : *packages_ptr) {
             if (existing_set.find(pkg) == existing_set.end()) {
                 ut_ini.addValue("Editor.EditorEngine", "EditPackages", pkg);
                 added_any = true;
             }
         }
-        
+
         if (added_any) {
             return ut_ini.save(ut_ini_path);
         }
         return true; // Nothing to add
-        
+
     } else {
-        // Remove packages that match our UE2 packages
-        for (const auto& pkg : ue2_edit_packages) {
+        // Remove packages that match our UE2 packages (or override list)
+        for (const auto& pkg : *packages_ptr) {
             ut_ini.removeValue("Editor.EditorEngine", "EditPackages", pkg);
         }
         return ut_ini.save(ut_ini_path);
@@ -761,13 +977,13 @@ void DeusExBuilder::compileSinglePackage(const std::string& package, bool ue2) {
     std::vector<std::string> packages = {package};
     backupAndRemoveUFiles(packages, ue2);
 
-    if (!updateDeusExIni(true, ue2)) return;
+    if (!updateDeusExIni(true, ue2, &packages)) return;
 
     if (ue2) {
         process_exclusive_code(1, false, package); // Hide UE1 code
         process_exclusive_code(2, true, package);  // Show UE2 code
         
-        if (!updateUnrealTournamentIni(true)) return;
+        if (!updateUnrealTournamentIni(true, &packages)) return;
         
         // Change to UED22 directory for UE2 compilation
         fs::current_path(ued22_dir);
@@ -795,19 +1011,35 @@ void DeusExBuilder::compileSinglePackage(const std::string& package, bool ue2) {
         }
     }
 
-    updateDeusExIni(false, ue2);
+    updateDeusExIni(false, ue2, &packages);
     moveCompiledFiles(packages, ue2);
 
     std::cout << "Compilation complete." << std::endl;
 }
 
 void DeusExBuilder::compileAllPackages(bool ue2) {
-    const auto& packages = ue2 ? ue2_edit_packages : project_edit_packages;
+    const auto& all_packages = ue2 ? ue2_edit_packages : project_edit_packages;
     std::cout << std::endl << "Compiling all " << (ue2 ? "UE2" : "UE1") << " packages..." << std::endl;
+
+    // Filter out blacklisted packages
+    std::set<std::string> blacklist_set(blacklist_packages.begin(), blacklist_packages.end());
+    std::vector<std::string> packages;
+    for (const auto& pkg : all_packages) {
+        if (blacklist_set.find(pkg) == blacklist_set.end()) {
+            packages.push_back(pkg);
+        } else {
+            std::cout << "Skipping blacklisted package: " << pkg << std::endl;
+        }
+    }
+
+    if (packages.empty()) {
+        std::cout << "No packages to compile after applying blacklist." << std::endl;
+        return;
+    }
 
     backupAndRemoveUFiles(packages, ue2);
 
-    if (!updateDeusExIni(true, ue2)) return;
+    if (!updateDeusExIni(true, ue2, &packages)) return;
 
     if (ue2) {
         // Process version-specific code for packages that exist in both lists
@@ -815,13 +1047,13 @@ void DeusExBuilder::compileAllPackages(bool ue2) {
             process_exclusive_code(1, false, pkg); // Hide UE1 code
             process_exclusive_code(2, true, pkg);  // Show UE2 code
         }
-        
-        if (!updateUnrealTournamentIni(true)) return;
-        
+
+        if (!updateUnrealTournamentIni(true, &packages)) return;
+
         // Change to UED22 directory for UE2 compilation
         fs::current_path(ued22_dir);
         runCompiler(ued22_dir + "/UCC.exe");
-        
+
         // Restore markers after compilation
         for (const auto& pkg : packages) {
             process_exclusive_code(1, true, pkg);
@@ -832,10 +1064,10 @@ void DeusExBuilder::compileAllPackages(bool ue2) {
         for (const auto& pkg : packages) {
             process_exclusive_code(2, false, pkg); // Hide UE2 code
         }
-        
+
         fs::current_path(system_dir);
         runCompiler(system_dir + "/UCC.exe");
-        
+
         // Restore markers after compilation
         for (const auto& pkg : packages) {
             process_exclusive_code(1, true, pkg);
@@ -843,7 +1075,7 @@ void DeusExBuilder::compileAllPackages(bool ue2) {
         }
     }
 
-    updateDeusExIni(false, ue2);
+    updateDeusExIni(false, ue2, &packages);
     moveCompiledFiles(packages, ue2);
 
     std::cout << "Compilation complete." << std::endl;
