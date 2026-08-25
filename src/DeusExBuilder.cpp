@@ -8,6 +8,8 @@
 #include <set>
 #include <algorithm>
 #include <sstream>
+#include <cctype>
+#include <iomanip>
 #include <windows.h>
 
 namespace fs = std::filesystem;
@@ -21,7 +23,7 @@ static void resetColor() {
     SetConsoleTextAttribute(hConsole, 7); // White on black
 }
 
-DeusExBuilder::DeusExBuilder() : ue2_support(false) {}
+DeusExBuilder::DeusExBuilder() : ue2_support(false), ucc_exists(false), lcc_exists(false), compiler("UCC") {}
 
 std::vector<std::string> DeusExBuilder::findGameRootsFromCwd() {
     std::vector<std::string> results;
@@ -56,10 +58,57 @@ std::vector<std::string> DeusExBuilder::findGameRootsFromCwd() {
 bool DeusExBuilder::initialize() {
     if (!loadOrCreateConfig()) return false;
     if (!validateGamePath()) return false;
+    if (!setupCompiler()) return false;
     if (!validateProjectPath()) return false;
     if (!setupProjectIni()) return false;
     if (!syncEditPackages()) return false;
+    configureConsoleWindow();
     return true;
+}
+
+void DeusExBuilder::configureConsoleWindow() {
+    HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO console_info;
+    if (console == INVALID_HANDLE_VALUE || !GetConsoleScreenBufferInfo(console, &console_info)) {
+        return;
+    }
+
+    const int column_width = 32;
+    const size_t ue2_rows = (ue2_support && !ue2_edit_packages.empty()) ? ue2_edit_packages.size() + 1 : 0;
+    size_t package_rows = project_edit_packages.size() + 1;
+    if (ue2_rows > package_rows) package_rows = ue2_rows;
+    if (blacklist_packages.size() > package_rows) package_rows = blacklist_packages.size();
+
+    const SHORT minimum_width = static_cast<SHORT>(column_width * 3 + 4);
+    const SHORT minimum_height = static_cast<SHORT>(package_rows + 16);
+    const COORD largest_size = GetLargestConsoleWindowSize(console);
+    if (largest_size.X == 0 || largest_size.Y == 0) {
+        return;
+    }
+
+    SHORT target_width = console_info.dwSize.X;
+    SHORT target_height = console_info.dwSize.Y;
+    if (target_width < minimum_width) target_width = minimum_width;
+    if (target_height < minimum_height) target_height = minimum_height;
+    if (target_width > largest_size.X) target_width = largest_size.X;
+    if (target_height > largest_size.Y) target_height = largest_size.Y;
+
+    COORD target_buffer_size = console_info.dwSize;
+    if (target_buffer_size.X < target_width) target_buffer_size.X = target_width;
+    if (target_buffer_size.Y < target_height) target_buffer_size.Y = target_height;
+    SetConsoleScreenBufferSize(console, target_buffer_size);
+
+    CONSOLE_SCREEN_BUFFER_INFO resized_info;
+    if (!GetConsoleScreenBufferInfo(console, &resized_info)) {
+        return;
+    }
+
+    SMALL_RECT target_window = resized_info.srWindow;
+    const SHORT current_window_width = target_window.Right - target_window.Left + 1;
+    const SHORT current_window_height = target_window.Bottom - target_window.Top + 1;
+    if (current_window_width < target_width) target_window.Right = target_window.Left + target_width - 1;
+    if (current_window_height < target_height) target_window.Bottom = target_window.Top + target_height - 1;
+    SetConsoleWindowInfo(console, TRUE, &target_window);
 }
 
 bool DeusExBuilder::loadOrCreateConfig() {
@@ -186,6 +235,70 @@ bool DeusExBuilder::loadOrCreateConfig() {
     classes_dir = project_path + "/Classes";
 
     return true;
+}
+
+bool DeusExBuilder::setupCompiler() {
+    ucc_exists = fs::exists(system_dir + "/UCC.exe");
+    lcc_exists = fs::exists(system_dir + "/LCC.exe");
+
+    if (!ucc_exists && !lcc_exists) {
+        std::cerr << "Neither UCC.exe nor LCC.exe was found in the System directory" << std::endl;
+        return false;
+    }
+
+    IniFile config;
+    if (!config.load(config_path)) {
+        std::cerr << "Failed to load MojoMake.ini" << std::endl;
+        return false;
+    }
+
+    std::string configured_compiler = config.getValue("Build", "Compiler");
+    std::transform(configured_compiler.begin(), configured_compiler.end(), configured_compiler.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+
+    if (configured_compiler == "UCC" && ucc_exists) {
+        compiler = "UCC";
+    } else if (configured_compiler == "LCC" && lcc_exists) {
+        compiler = "LCC";
+    } else if (ucc_exists) {
+        compiler = "UCC";
+    } else {
+        compiler = "LCC";
+    }
+
+    if (configured_compiler != compiler) {
+        config.setValue("Build", "Compiler", compiler);
+        if (!config.save(config_path)) {
+            std::cerr << "Failed to save compiler selection to MojoMake.ini" << std::endl;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void DeusExBuilder::toggleCompiler() {
+    std::string next_compiler = compiler == "UCC" ? "LCC" : "UCC";
+    bool next_exists = next_compiler == "UCC" ? ucc_exists : lcc_exists;
+
+    if (!next_exists) {
+        std::cout << next_compiler << ".exe is not available in the System directory." << std::endl;
+        return;
+    }
+
+    IniFile config;
+    if (!config.load(config_path)) {
+        std::cerr << "Failed to load MojoMake.ini" << std::endl;
+        return;
+    }
+
+    compiler = next_compiler;
+    config.setValue("Build", "Compiler", compiler);
+    if (config.save(config_path)) {
+        std::cout << "Compiler changed to " << compiler << "." << std::endl;
+    } else {
+        std::cerr << "Failed to save compiler selection to MojoMake.ini" << std::endl;
+    }
 }
 
 bool DeusExBuilder::validateGamePath() {
@@ -332,88 +445,130 @@ bool DeusExBuilder::syncEditPackages() {
 void DeusExBuilder::showMenu() {
     while (true) {
         std::cout << std::endl;
+        const int column_width = 32;
+        const auto print_title_value = [column_width](const std::string& label, const std::string& value) {
+            setColor(11); // Cyan
+            std::cout << label;
+            setColor(12); // Red
+            std::cout << value;
+            resetColor();
+            const size_t content_width = label.size() + value.size();
+            if (content_width < static_cast<size_t>(column_width)) {
+                std::cout << std::string(column_width - content_width, ' ');
+            }
+        };
+
         setColor(11); // Cyan
-        std::cout << "===============================================" << std::endl;
-        std::cout << "UnrealScript Compiler Menu" << std::endl;
-		std::cout << "Version " << MOJO_MAKE_VERSION << std::endl;
+        std::cout << std::string(column_width * 3, '=') << std::endl;
+        std::cout << std::left << std::setw(column_width) << "[ UnrealScript Compiler ]";
         resetColor();
         setColor(14); // Yellow
-        std::cout << "Project: ";
-        resetColor();
-        std::cout << project_name << std::endl;
+        std::cout << std::left << std::setw(column_width) << "[ Options ]";
+        std::cout << std::endl;
+
+        print_title_value("Version ", MOJO_MAKE_VERSION);
         setColor(14); // Yellow
-        std::cout << "UE2 support: ";
-        resetColor();
-        std::cout << (ue2_support ? "Yes" : "No") << std::endl;
+        std::cout << std::left << std::setw(column_width) << "s: Scan UE2 compatibility";
+        std::cout << "r: Reset Config (MojoMake.ini)" << std::endl;
+
+        print_title_value("Project: ", project_name);
+        setColor(14); // Yellow
+        std::cout << std::left << std::setw(column_width) << ("t: Toggle Compiler (" + compiler + ")");
+        std::cout << "g: Set Game Directory" << std::endl;
+
+        print_title_value("UCC: ", ucc_exists ? "Yes" : "No");
+        setColor(14); // Yellow
+        std::cout << std::left << std::setw(column_width) << "b: Toggle blacklist";
+        std::cout << "j: Set Project Name" << std::endl;
+
+        print_title_value("LCC: ", lcc_exists ? "Yes" : "No");
+        setColor(14); // Yellow
+        std::cout << std::left << std::setw(column_width)
+                  << (ue2_support ? "u: Update UnrealTournament.ini" : "");
+        std::cout << "p: Rescan packages" << std::endl;
+
+        print_title_value("UE2 support: ", ue2_support ? "Yes" : "No");
+        setColor(14); // Yellow
+        std::cout << std::left << std::setw(column_width)
+                  << (ue2_support ? "c: Clean UE2 packages" : "");
+        std::cout << "q: Quit" << std::endl;
+
         setColor(11); // Cyan
-        std::cout << "===============================================" << std::endl;
+        std::cout << std::endl;
+        std::cout << std::string(column_width * 3, '=') << std::endl;
+        resetColor();
+        std::cout << std::endl;
+
+        const bool show_ue2_packages = ue2_support && !ue2_edit_packages.empty();
+        const size_t ue1_row_count = project_edit_packages.size() + 1;
+        const size_t ue2_row_count = show_ue2_packages ? ue2_edit_packages.size() + 1 : 0;
+        size_t row_count = ue1_row_count;
+        if (ue2_row_count > row_count) row_count = ue2_row_count;
+        if (blacklist_packages.size() > row_count) row_count = blacklist_packages.size();
+
+        std::cout << std::endl;
+        setColor(10); // Green
+        std::cout << std::left << std::setw(column_width) << "[ UE1 Packages ]";
+        resetColor();
+        if (show_ue2_packages) {
+            setColor(13); // Magenta
+            std::cout << std::left << std::setw(column_width) << "[ UE2 Packages ]";
+            resetColor();
+        } else {
+            std::cout << std::left << std::setw(column_width) << "";
+        }
+        setColor(8); // Grey
+        std::cout << "[ Blacklisted ]" << std::endl;
         resetColor();
 
-        // Show blacklisted packages (in grey) under the title
-        if (!blacklist_packages.empty()) {
-            setColor(8); // Grey
-            std::cout << "\n=== Blacklisted EditPackages ===" << std::endl;
-            for (const auto& bp : blacklist_packages) {
-                std::cout << "  - " << bp << std::endl;
+        int choice_index = 2;
+        for (size_t row = 0; row < row_count; ++row) {
+            if (row == 0) {
+                setColor(10); // Green
+                std::cout << std::left << std::setw(column_width) << "1: All UE1 packages";
+                resetColor();
+            } else if (row - 1 < project_edit_packages.size()) {
+                const auto& package = project_edit_packages[row - 1];
+                const bool is_blacklisted = std::find(blacklist_packages.begin(), blacklist_packages.end(), package) != blacklist_packages.end();
+                setColor(is_blacklisted ? 6 : 10); // Orange/Brown or green
+                std::cout << std::left << std::setw(column_width)
+                          << (std::to_string(choice_index++) + ": " + package);
+                resetColor();
+            } else {
+                std::cout << std::left << std::setw(column_width) << "";
             }
-            resetColor();
+
+            if (show_ue2_packages) {
+                const size_t ue2_row = row;
+                if (ue2_row == 0) {
+                    setColor(13); // Magenta
+                    std::cout << std::left << std::setw(column_width)
+                              << (std::to_string(static_cast<int>(project_edit_packages.size()) + 2) + ": All UE2 packages");
+                    resetColor();
+                } else if (ue2_row - 1 < ue2_edit_packages.size()) {
+                    const auto& package = ue2_edit_packages[ue2_row - 1];
+                    const bool is_blacklisted = std::find(blacklist_packages.begin(), blacklist_packages.end(), package) != blacklist_packages.end();
+                    setColor(is_blacklisted ? 6 : 13); // Orange/Brown or magenta
+                    std::cout << std::left << std::setw(column_width)
+                              << (std::to_string(static_cast<int>(project_edit_packages.size()) + 2 + ue2_row) + ": " + package);
+                    resetColor();
+                } else {
+                    std::cout << std::left << std::setw(column_width) << "";
+                }
+            } else {
+                std::cout << std::left << std::setw(column_width) << "";
+            }
+
+            if (row < blacklist_packages.size()) {
+                setColor(8); // Grey
+                std::cout << "- " << blacklist_packages[row];
+                resetColor();
+            }
             std::cout << std::endl;
         }
 
-        setColor(10); // Green
-        std::cout << "\n===============  UE1 Packages  ================" << std::endl;
-        std::cout << "1: All UE1 packages" << std::endl;
-        resetColor();
-        
-        int choice_index = 2;
-        for (size_t i = 0; i < project_edit_packages.size(); ++i) {
-            const auto& pkg = project_edit_packages[i];
-            bool is_black = std::find(blacklist_packages.begin(), blacklist_packages.end(), pkg) != blacklist_packages.end();
-            if (is_black) {
-                setColor(6); // Orange/Brown
-                std::cout << choice_index << ": " << pkg << " [blacklisted]" << std::endl;
-            } else {
-                setColor(10); // Green
-                std::cout << choice_index << ": " << pkg << std::endl;
-            }
-            resetColor();
-            choice_index++;
-        }
-        
-        if (ue2_support && !ue2_edit_packages.empty()) {
-            setColor(13); // Magenta
-            std::cout << "\n===============  UE2 Packages  ================" << std::endl;
-            std::cout << choice_index << ": All UE2 packages" << std::endl;
-            resetColor();
-            choice_index++;
-            
-            for (size_t i = 0; i < ue2_edit_packages.size(); ++i) {
-                setColor(13); // Magenta
-                std::cout << choice_index << ": " << ue2_edit_packages[i] << std::endl;
-                resetColor();
-                choice_index++;
-            }
-        }
-        
-        setColor(14); // Yellow
-        std::cout << "\n=================  Options  ===================" << std::endl;
-        std::cout << "s: Scan packages for UE2 compatibility" << std::endl;
-        setColor(14); // Yellow
-        std::cout << "b: Toggle blacklist for project packages" << std::endl;
-        if (ue2_support) {
-            std::cout << "u: Update UnrealTournament.ini with UE2 packages" << std::endl;
-            std::cout << "c: Clean UE2 packages from UnrealTournament.ini" << std::endl;
-        }
-        std::cout << std::endl;
-		std::cout << "r: Reset Config (MojoMake.ini)" << std::endl;
-		std::cout << "g: Set Game Directory" << std::endl;
-        std::cout << "j: Set Project Name" << std::endl;
-		std::cout << "p: Rescan packages" << std::endl;
-        std::cout << "q: Quit" << std::endl;
-        resetColor();
-        std::cout << std::endl << "Please select a package to compile: ";
-        
         std::string input;
+        std::cout << std::endl << "Please select a package to compile: ";
         std::getline(std::cin, input);
         
         if (input.empty()) {
@@ -428,6 +583,11 @@ void DeusExBuilder::showMenu() {
         
         if (input == "s" || input == "S") {
             scanForUE2Compatibility();
+            continue;
+        }
+
+        if (input == "t" || input == "T") {
+            toggleCompiler();
             continue;
         }
 
@@ -1018,7 +1178,7 @@ void DeusExBuilder::compileSinglePackage(const std::string& package, bool ue2) {
 
         fs::current_path(system_dir);
         std::string args = "ini=" + project_system_dir + "/" + project_name + ".ini -package=" + package;
-        runCompiler(system_dir + "/UCC.exe", args);
+        runCompiler(system_dir + "/" + compiler + ".exe", args);
 
         if (in_ue2) {
             process_exclusive_code(1, true, package);
@@ -1091,7 +1251,7 @@ void DeusExBuilder::compileAllPackages(bool ue2) {
         }
 
         fs::current_path(system_dir);
-        runCompiler(system_dir + "/LCC.exe");
+        runCompiler(system_dir + "/" + compiler + ".exe");
 
         // Restore markers after compilation
         for (const auto& pkg : packages) {

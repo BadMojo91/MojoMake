@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#define MOJO_MAKE_VERSION "1.2"
+#define MOJO_MAKE_VERSION "1.2.1"
 
 class DeusExBuilder {
 private:
@@ -14,6 +14,9 @@ private:
     std::vector<std::string> ue2_edit_packages;
     std::vector<std::string> blacklist_packages;
     bool ue2_support;
+    bool ucc_exists;
+    bool lcc_exists;
+    std::string compiler;
 
     std::string system_dir;
     std::string ued22_dir;
@@ -32,6 +35,7 @@ private:
     void updateUnrealTournamentIniManual();
     void cleanUnrealTournamentIni();
     void performInitialPackageScan();
+    void configureConsoleWindow();
     void process_exclusive_code(int version, bool is_enabled, const std::string& package = "");
     bool updateDeusExIni(bool add_packages, bool ue2 = false, const std::vector<std::string>* packages_override = nullptr);
     bool updateUnrealTournamentIni(bool add_packages, const std::vector<std::string>* packages_override = nullptr);
@@ -41,6 +45,8 @@ private:
     void compileSinglePackage(const std::string& package, bool ue2);
     void compileAllPackages(bool ue2);
     bool ensureBlacklistedUFilesInGameSystem(const std::vector<std::string>& packages, bool ue2 = false);
+    bool setupCompiler();
+    void toggleCompiler();
 
 public:
     DeusExBuilder();
