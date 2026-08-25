@@ -71,3 +71,5 @@ Testing/
 /MojoMake/x64
 /x64
 *.aps
+*.zip
+*.ini

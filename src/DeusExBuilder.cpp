@@ -975,44 +975,62 @@ void DeusExBuilder::compileSinglePackage(const std::string& package, bool ue2) {
     std::cout << std::endl << "Compiling " << package << (ue2 ? " for UE2" : " for UE1") << "..." << std::endl;
 
     std::vector<std::string> packages = {package};
-    backupAndRemoveUFiles(packages, ue2);
+    bool is_blacklisted = std::find(
+        blacklist_packages.begin(),
+        blacklist_packages.end(),
+        package) != blacklist_packages.end();
+
+    if (is_blacklisted) {
+        if (!ensureBlacklistedUFilesInGameSystem(packages, ue2)) {
+            return;
+        }
+
+        std::cout << "Preserving existing .u for blacklisted package: "
+                  << package << std::endl;
+    } else {
+        backupAndRemoveUFiles(packages, ue2);
+    }
 
     if (!updateDeusExIni(true, ue2, &packages)) return;
 
     if (ue2) {
-        process_exclusive_code(1, false, package); // Hide UE1 code
-        process_exclusive_code(2, true, package);  // Show UE2 code
-        
+        process_exclusive_code(1, false, package);
+        process_exclusive_code(2, true, package);
+
         if (!updateUnrealTournamentIni(true, &packages)) return;
-        
-        // Change to UED22 directory for UE2 compilation
+
         fs::current_path(ued22_dir);
         std::string args = "ini=" + ued22_dir + "/UnrealTournament.ini -package=" + package;
         runCompiler(ued22_dir + "/UCC.exe", args);
-        
-        process_exclusive_code(1, true, package);  // Restore UE1 markers
-        process_exclusive_code(2, true, package);  // Restore UE2 markers
+
+        process_exclusive_code(1, true, package);
+        process_exclusive_code(2, true, package);
     } else {
-        // Check if this UE1 package also exists in UE2 list for comment processing
-        bool in_ue2 = std::find(ue2_edit_packages.begin(), ue2_edit_packages.end(), package) != ue2_edit_packages.end();
-        
+        bool in_ue2 = std::find(
+            ue2_edit_packages.begin(),
+            ue2_edit_packages.end(),
+            package) != ue2_edit_packages.end();
+
         if (in_ue2) {
-            process_exclusive_code(2, false, package); // Hide UE2 code
-            process_exclusive_code(1, true, package);  // Show UE1 code
+            process_exclusive_code(2, false, package);
+            process_exclusive_code(1, true, package);
         }
-        
+
         fs::current_path(system_dir);
         std::string args = "ini=" + project_system_dir + "/" + project_name + ".ini -package=" + package;
         runCompiler(system_dir + "/UCC.exe", args);
-        
+
         if (in_ue2) {
-            process_exclusive_code(1, true, package);  // Restore UE1 markers
-            process_exclusive_code(2, true, package);  // Restore UE2 markers
+            process_exclusive_code(1, true, package);
+            process_exclusive_code(2, true, package);
         }
     }
 
     updateDeusExIni(false, ue2, &packages);
-    moveCompiledFiles(packages, ue2);
+
+    if (!is_blacklisted) {
+        moveCompiledFiles(packages, ue2);
+    }
 
     std::cout << "Compilation complete." << std::endl;
 }
@@ -1021,24 +1039,31 @@ void DeusExBuilder::compileAllPackages(bool ue2) {
     const auto& all_packages = ue2 ? ue2_edit_packages : project_edit_packages;
     std::cout << std::endl << "Compiling all " << (ue2 ? "UE2" : "UE1") << " packages..." << std::endl;
 
-    // Filter out blacklisted packages
+    // Build full package list (include blacklisted packages so they are added to DeusEx.ini)
     std::set<std::string> blacklist_set(blacklist_packages.begin(), blacklist_packages.end());
-    std::vector<std::string> packages;
-    for (const auto& pkg : all_packages) {
+    std::vector<std::string> packages(all_packages.begin(), all_packages.end());
+    std::vector<std::string> non_blacklisted_packages;
+    std::vector<std::string> blacklisted_packages_to_prepare;
+
+    for (const auto& pkg : packages) {
         if (blacklist_set.find(pkg) == blacklist_set.end()) {
-            packages.push_back(pkg);
+            non_blacklisted_packages.push_back(pkg);
         } else {
-            std::cout << "Skipping blacklisted package: " << pkg << std::endl;
+            blacklisted_packages_to_prepare.push_back(pkg);
+            std::cout << "Preserving existing .u for blacklisted package: "
+                      << pkg << std::endl;
         }
     }
 
-    if (packages.empty()) {
-        std::cout << "No packages to compile after applying blacklist." << std::endl;
+    if (!ensureBlacklistedUFilesInGameSystem(blacklisted_packages_to_prepare, ue2)) {
         return;
     }
 
-    backupAndRemoveUFiles(packages, ue2);
+    if (!non_blacklisted_packages.empty()) {
+        backupAndRemoveUFiles(non_blacklisted_packages, ue2);
+    }
 
+    // Update DeusEx.ini with the full package list (including blacklisted)
     if (!updateDeusExIni(true, ue2, &packages)) return;
 
     if (ue2) {
@@ -1066,7 +1091,7 @@ void DeusExBuilder::compileAllPackages(bool ue2) {
         }
 
         fs::current_path(system_dir);
-        runCompiler(system_dir + "/UCC.exe");
+        runCompiler(system_dir + "/LCC.exe");
 
         // Restore markers after compilation
         for (const auto& pkg : packages) {
@@ -1074,9 +1099,38 @@ void DeusExBuilder::compileAllPackages(bool ue2) {
             process_exclusive_code(2, true, pkg);
         }
     }
-
+        
+    // Remove packages from DeusEx.ini after compile (full list)
     updateDeusExIni(false, ue2, &packages);
-    moveCompiledFiles(packages, ue2);
+
+    // Move only non-blacklisted compiled files into the project system folder.
+    // Blacklisted packages remain in the game system folder.
+    moveCompiledFiles(non_blacklisted_packages, ue2);
 
     std::cout << "Compilation complete." << std::endl;
+}   
+
+bool DeusExBuilder::ensureBlacklistedUFilesInGameSystem(const std::vector<std::string>& packages, bool ue2) {
+    if (ue2) {
+        return true;
+    }
+
+    for (const auto& pkg : packages) {
+        std::string project_u_file = project_system_dir + "/" + pkg + ".u";
+        std::string game_u_file = system_dir + "/" + pkg + ".u";
+
+        if (fs::exists(project_u_file) && !fs::exists(game_u_file)) {
+            try {
+                std::cout << "Copying existing blacklisted " << pkg
+                          << ".u from project system to game system..." << std::endl;
+                fs::copy_file(project_u_file, game_u_file);
+            } catch (const std::exception& e) {
+                std::cerr << "Failed to copy blacklisted " << pkg
+                          << ".u to game system: " << e.what() << std::endl;
+                return false;
+            }
+        }
+    }
+
+    return true;
 }

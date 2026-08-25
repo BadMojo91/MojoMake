@@ -1,11 +1,15 @@
 #include "DeusExBuilder.h"
+
+#include <Windows.h>
 #include <iostream>
+#include "resource.h"
 
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << std::endl;
 }
 
 int main(int argc, char* argv[]) {
+
     if (argc > 1) {
         std::string arg = argv[1];
         if (arg == "--help" || arg == "-h") {
