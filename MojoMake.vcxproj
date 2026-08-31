@@ -131,6 +131,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\DeusExBuilder.cpp" />
+    <ClCompile Include="src\DeusExBuilder_Build.cpp" />
+    <ClCompile Include="src\DeusExBuilder_Compiler.cpp" />
+    <ClCompile Include="src\DeusExBuilder_Ini.cpp" />
+    <ClCompile Include="src\DeusExBuilder_Initialization.cpp" />
+    <ClCompile Include="src\DeusExBuilder_Menu.cpp" />
+    <ClCompile Include="src\DeusExBuilder_Packages.cpp" />
     <ClCompile Include="src\IniFile.cpp" />
     <ClCompile Include="src\MojoMake.cpp" />
   </ItemGroup>

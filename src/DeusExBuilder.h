@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#define MOJO_MAKE_VERSION "1.2.1"
+#define MOJO_MAKE_VERSION "1.2.2"
 
 class DeusExBuilder {
 private:
@@ -44,6 +44,7 @@ private:
     int runCompiler(const std::string& ucc_path, const std::string& args = "");
     void compileSinglePackage(const std::string& package, bool ue2);
     void compileAllPackages(bool ue2);
+    void toggleBlacklistPackages();
     bool ensureBlacklistedUFilesInGameSystem(const std::vector<std::string>& packages, bool ue2 = false);
     bool setupCompiler();
     void toggleCompiler();
