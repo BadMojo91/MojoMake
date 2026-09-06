@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#define MOJO_MAKE_VERSION "1.2.2"
+#define MOJO_MAKE_VERSION "1.2.3"
 
 class DeusExBuilder {
 private:
@@ -14,12 +14,14 @@ private:
     std::vector<std::string> ue2_edit_packages;
     std::vector<std::string> blacklist_packages;
     bool ue2_support;
+    bool ue22x_support;
     bool ucc_exists;
     bool lcc_exists;
     std::string compiler;
 
     std::string system_dir;
     std::string ued22_dir;
+    std::string ued22x_dir;
     std::string classes_dir;
     std::string project_system_dir;
     std::string config_path;

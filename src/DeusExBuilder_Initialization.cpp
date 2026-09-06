@@ -73,11 +73,15 @@ bool DeusExBuilder::loadOrCreateConfig() {
         project_path = game_path + "/" + project_name;
         system_dir = game_path + "/System";
         ued22_dir = game_path + "/UED22";
+		ued22x_dir = game_path + "/UED22x";
         project_system_dir = project_path + "/System";
         classes_dir = project_path + "/Classes";
 
         // Check UE2 support for scanning
         ue2_support = fs::exists(ued22_dir + "/UCC.exe") && fs::exists(ued22_dir + "/UnrealTournament.ini");
+
+        // Check UE2x support for scanning
+        ue22x_support = fs::exists(ued22x_dir + "/UCC.exe") && fs::exists(ued22x_dir + "/UnrealTournament.ini");
 
         // Perform initial package scanning to populate MojoMake.ini
         std::cout << "Performing initial package scan..." << std::endl;

@@ -38,10 +38,15 @@ void DeusExBuilder::backupAndRemoveUFiles(const std::vector<std::string>& packag
 void DeusExBuilder::moveCompiledFiles(const std::vector<std::string>& packages, bool ue2) {
     for (const auto& pkg : packages) {
         if (ue2) {
-            // For UE2: move from UED22 to UED22 (they compile in place)
+			// For UE2: copy from UED22 to UED22x so both versions have the compiled .u
             std::string ued22_file = ued22_dir + "/" + pkg + ".u";
             if (fs::exists(ued22_file)) {
                 std::cout << "Compiled " << pkg << ".u for UE2 (in UED22 folder)" << std::endl;
+
+                if (ue22x_support) {
+					std::cout << "Copying " << pkg << ".u to UED22x folder..." << std::endl;
+                    fs::copy_file(ued22_file, ued22x_dir + "/" + pkg + ".u", fs::copy_options::overwrite_existing);
+                }
             }
         } else {
             // For UE1: move from game system to project system

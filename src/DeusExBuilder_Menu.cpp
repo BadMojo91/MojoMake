@@ -179,10 +179,12 @@ void DeusExBuilder::showMenu() {
                   << (ue2_support ? "u: Update UnrealTournament.ini" : "") << std::endl;
 
 
-        print_title_value("UE2 support: ", ue2_support ? "Yes" : "No");
+        print_title_value("UE22 support: ", ue2_support ? "Yes" : "No");
         setColor(14); // Yellow
         std::cout << std::left << std::setw(column_width)
                   << (ue2_support ? "c: Clean UE2 packages" : "") << std::endl;
+
+        print_title_value("UE22x support: ", ue22x_support ? "Yes" : "No");
  
 
         setColor(11); // Cyan
