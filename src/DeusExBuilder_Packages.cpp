@@ -10,15 +10,15 @@
 namespace fs = std::filesystem;
 
 void DeusExBuilder::performInitialPackageScan() {
-    if (!fs::exists(system_dir + "/Default.ini") || !fs::exists(project_system_dir + "/" + project_name + ".ini")) {
+    if (!fs::exists(system_dir + "\\Default.ini") || !fs::exists(project_system_dir + "\\" + project_name + ".ini")) {
         std::cout << "Skipping initial scan - required ini files not found" << std::endl;
         return;
     }
 
     IniFile default_ini, project_ini, config;
 
-    if (!default_ini.load(system_dir + "/Default.ini") || 
-        !project_ini.load(project_system_dir + "/" + project_name + ".ini") ||
+    if (!default_ini.load(system_dir + "\\Default.ini") || 
+        !project_ini.load(project_system_dir + "\\" + project_name + ".ini") ||
         !config.load(config_path)) {
         std::cout << "Failed to load ini files for initial scan" << std::endl;
         return;
@@ -38,8 +38,8 @@ void DeusExBuilder::performInitialPackageScan() {
             project_only_packages.push_back(pkg);
 
             // Check for UE2 compatibility
-            std::string package_path = game_path + "/" + pkg;
-            std::string package_classes = package_path + "/Classes";
+            std::string package_path = game_path + "\\" + pkg;
+            std::string package_classes = package_path + "\\Classes";
 
             if (fs::exists(package_classes)) {
                 bool has_ue_blocks = false;
@@ -121,8 +121,8 @@ void DeusExBuilder::scanForUE2Compatibility() {
         }
 
         // Look for package directory in game path
-        std::string package_path = game_path + "/" + package;
-        std::string package_classes = package_path + "/Classes";
+        std::string package_path = game_path + "\\" + package;
+        std::string package_classes = package_path + "\\Classes";
 
         if (!fs::exists(package_classes)) {
             std::cout << " no Classes directory found" << std::endl;
@@ -200,7 +200,7 @@ void DeusExBuilder::process_exclusive_code(int version, bool is_enabled, const s
     std::string target_dir = classes_dir;
     if (!package.empty()) {
         // Use package-specific directory
-        target_dir = game_path + "/" + package + "/Classes";
+        target_dir = game_path + "\\" + package + "\\Classes";
     }
 
     if (!fs::exists(target_dir)) {

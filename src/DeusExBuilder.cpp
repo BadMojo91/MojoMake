@@ -1,7 +1,7 @@
 #include "DeusExBuilder.h"
 #include "DeusExBuilder.h"
 
-DeusExBuilder::DeusExBuilder() : ue2_support(false), ucc_exists(false), lcc_exists(false), compiler("UCC") {}
+DeusExBuilder::DeusExBuilder() : ue22_support(false), ucc_exists(false), lcc_exists(false), compiler("UCC") {}
 
 bool DeusExBuilder::initialize() {
     if (!loadOrCreateConfig()) return false;

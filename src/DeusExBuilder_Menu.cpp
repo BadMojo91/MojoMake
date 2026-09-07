@@ -97,7 +97,7 @@ void DeusExBuilder::configureConsoleWindow() {
     }
 
     const int column_width = 32;
-    const size_t ue2_rows = (ue2_support && !ue2_edit_packages.empty()) ? ue2_edit_packages.size() + 1 : 0;
+    const size_t ue2_rows = (ue22_support && !ue2_edit_packages.empty()) ? ue2_edit_packages.size() + 1 : 0;
     size_t package_rows = project_edit_packages.size() + 1;
     if (ue2_rows > package_rows) package_rows = ue2_rows;
     if (blacklist_packages.size() > package_rows) package_rows = blacklist_packages.size();
@@ -176,13 +176,13 @@ void DeusExBuilder::showMenu() {
         print_title_value("LCC: ", lcc_exists ? "Yes" : "No");
         setColor(14); // Yellow
         std::cout << std::left << std::setw(column_width)
-                  << (ue2_support ? "u: Update UnrealTournament.ini" : "") << std::endl;
+                  << (ue22_support ? "u: Update UnrealTournament.ini" : "") << std::endl;
 
 
-        print_title_value("UE22 support: ", ue2_support ? "Yes" : "No");
+        print_title_value("UE22 support: ", ue22_support ? "Yes" : "No");
         setColor(14); // Yellow
         std::cout << std::left << std::setw(column_width)
-                  << (ue2_support ? "c: Clean UE2 packages" : "") << std::endl;
+                  << (ue22_support ? "c: Clean UE2 packages" : "") << std::endl;
 
         print_title_value("UE22x support: ", ue22x_support ? "Yes" : "No");
  
@@ -193,7 +193,7 @@ void DeusExBuilder::showMenu() {
         resetColor();
         std::cout << std::endl;
 
-        const bool show_ue2_packages = ue2_support && !ue2_edit_packages.empty();
+        const bool show_ue2_packages = ue22_support && !ue2_edit_packages.empty();
         const size_t ue1_row_count = project_edit_packages.size() + 1;
         const size_t ue2_row_count = show_ue2_packages ? ue2_edit_packages.size() + 1 : 0;
         size_t row_count = ue1_row_count;
@@ -313,12 +313,12 @@ void DeusExBuilder::showMenu() {
             continue;
         }
 
-        if ((input == "u" || input == "U") && ue2_support) {
+        if ((input == "u" || input == "U") && ue22_support) {
             updateUnrealTournamentIniManual();
             continue;
         }
 
-        if ((input == "c" || input == "C") && ue2_support) {
+        if ((input == "c" || input == "C") && ue22_support) {
             cleanUnrealTournamentIni();
             continue;
         }
@@ -338,7 +338,7 @@ void DeusExBuilder::showMenu() {
                 if (index >= 0 && index < (int)project_edit_packages.size()) {
                     std::string package = project_edit_packages[index];
                     compileSinglePackage(package, false);
-                } else if (ue2_support && !ue2_edit_packages.empty()) {
+                } else if (ue22_support && !ue2_edit_packages.empty()) {
                     int ue2_all_index = static_cast<int>(project_edit_packages.size());
                     if (index == ue2_all_index) {
                         compileAllPackages(true); // All UE2 packages

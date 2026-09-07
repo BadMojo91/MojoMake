@@ -8,8 +8,8 @@
 namespace fs = std::filesystem;
 
 bool DeusExBuilder::setupCompiler() {
-    ucc_exists = fs::exists(system_dir + "/UCC.exe");
-    lcc_exists = fs::exists(system_dir + "/LCC.exe");
+    ucc_exists = fs::exists(system_dir + "\\UCC.exe");
+    lcc_exists = fs::exists(system_dir + "\\LCC.exe");
 
     if (!ucc_exists && !lcc_exists) {
         std::cerr << "Neither UCC.exe nor LCC.exe was found in the System directory" << std::endl;

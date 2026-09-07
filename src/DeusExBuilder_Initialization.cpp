@@ -70,18 +70,18 @@ bool DeusExBuilder::loadOrCreateConfig() {
         }
 
         // Set up directory paths for scanning
-        project_path = game_path + "/" + project_name;
-        system_dir = game_path + "/System";
-        ued22_dir = game_path + "/UED22";
-		ued22x_dir = game_path + "/UED22x";
-        project_system_dir = project_path + "/System";
-        classes_dir = project_path + "/Classes";
+        project_path = game_path + "\\" + project_name;
+        system_dir = game_path + "\\System";
+        ued22_dir = game_path + "\\UED22";
+		ued22x_dir = game_path + "\\UED22x";
+        project_system_dir = project_path + "\\System";
+        classes_dir = project_path + "\\Classes";
 
         // Check UE2 support for scanning
-        ue2_support = fs::exists(ued22_dir + "/UCC.exe") && fs::exists(ued22_dir + "/UnrealTournament.ini");
+        ue22_support = fs::exists(ued22_dir + "\\UCC.exe") && fs::exists(ued22_dir + "\\UnrealTournament.ini");
 
         // Check UE2x support for scanning
-        ue22x_support = fs::exists(ued22x_dir + "/UCC.exe") && fs::exists(ued22x_dir + "/UnrealTournament.ini");
+        ue22x_support = fs::exists(ued22x_dir + "\\UCC.exe") && fs::exists(ued22x_dir + "\\UnrealTournament.ini");
 
         // Perform initial package scanning to populate MojoMake.ini
         std::cout << "Performing initial package scan..." << std::endl;
@@ -95,7 +95,7 @@ bool DeusExBuilder::loadOrCreateConfig() {
         // Automatically add [Build] blacklist containing Default.ini EditPackages
         try {
             IniFile default_ini;
-            if (fs::exists(system_dir + "/Default.ini") && default_ini.load(system_dir + "/Default.ini")) {
+            if (fs::exists(system_dir + "\\Default.ini") && default_ini.load(system_dir + "\\Default.ini")) {
                 auto default_edit_packages = default_ini.getValues("Editor.EditorEngine", "EditPackages");
                 // Avoid duplicates in the config
                 auto existing_black = config.getValues("Build", "Blacklist");
@@ -129,12 +129,12 @@ bool DeusExBuilder::loadOrCreateConfig() {
         }
     }
 
-    project_path = game_path + "/" + project_name;
-    system_dir = game_path + "/System";
-    ued22_dir = game_path + "/UED22";
-    project_system_dir = project_path + "/System";
-    classes_dir = project_path + "/Classes";
-
+    project_path = game_path + "\\" + project_name;
+    system_dir = game_path + "\\System";
+    ued22_dir = game_path + "\\UED22";
+    ued22x_dir = game_path + "\\UED22x";
+    project_system_dir = project_path + "\\System";
+    classes_dir = project_path + "\\Classes";
     return true;
 }
 
@@ -144,23 +144,26 @@ bool DeusExBuilder::validateGamePath() {
         return false;
     }
 
-    if (!fs::exists(system_dir + "/UCC.exe")) {
+    if (!fs::exists(system_dir + "\\UCC.exe")) {
         std::cerr << "UCC.exe not found in System directory" << std::endl;
         return false;
     }
 
-    if (!fs::exists(system_dir + "/DeusEx.ini")) {
+    if (!fs::exists(system_dir + "\\DeusEx.ini")) {
         std::cerr << "DeusEx.ini not found in System directory" << std::endl;
         return false;
     }
 
-    if (!fs::exists(system_dir + "/Default.ini")) {
+    if (!fs::exists(system_dir + "\\Default.ini")) {
         std::cerr << "Default.ini not found in System directory" << std::endl;
         return false;
     }
 
     // Check UE2 support
-    ue2_support = fs::exists(ued22_dir + "/UCC.exe") && fs::exists(ued22_dir + "/UnrealTournament.ini");
+    ue22_support = fs::exists(ued22_dir + "\\UCC.exe") && fs::exists(ued22_dir + "\\UnrealTournament.ini");
+
+    // Check UE2x support
+    ue22x_support = fs::exists(ued22x_dir + "\\UCC.exe") && fs::exists(ued22x_dir + "\\UnrealTournament.ini");
 
     return true;
 }
@@ -196,7 +199,7 @@ bool DeusExBuilder::validateProjectPath() {
 bool DeusExBuilder::setupProjectIni() {
     fs::create_directories(project_system_dir);
 
-    std::string project_ini = project_system_dir + "/" + project_name + ".ini";
+    std::string project_ini = project_system_dir + "\\" + project_name + ".ini";
 
     if (!fs::exists(project_ini)) {
         std::cout << project_name << ".ini not found in project System directory." << std::endl;
@@ -207,7 +210,7 @@ bool DeusExBuilder::setupProjectIni() {
 
         if (response == "y" || response == "Y") {
             try {
-                fs::copy_file(system_dir + "/DeusEx.ini", project_ini);
+                fs::copy_file(system_dir + "\\DeusEx.ini", project_ini);
                 std::cout << "Created " << project_ini << std::endl;
             } catch (const std::exception& e) {
                 std::cerr << "Failed to copy DeusEx.ini: " << e.what() << std::endl;
@@ -225,12 +228,12 @@ bool DeusExBuilder::setupProjectIni() {
 bool DeusExBuilder::syncEditPackages() {
     IniFile default_ini, project_ini, config;
 
-    if (!default_ini.load(system_dir + "/Default.ini")) {
+    if (!default_ini.load(system_dir + "\\Default.ini")) {
         std::cerr << "Failed to load Default.ini" << std::endl;
         return false;
     }
 
-    if (!project_ini.load(project_system_dir + "/" + project_name + ".ini")) {
+    if (!project_ini.load(project_system_dir + "\\" + project_name + ".ini")) {
         std::cerr << "Failed to load project ini" << std::endl;
         return false;
     }
